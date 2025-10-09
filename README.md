@@ -392,7 +392,11 @@ profiles {
     int profile_id PK
     int user_id FK
     string nickname
+    string tag
     string avatar_path
+    string description
+    bool is_male
+    date birthday
     bool is_online
     string about
     timestamp created_at
@@ -409,8 +413,8 @@ sessions {
 
 channels {
     int channel_id PK
-    string name
-    string topic
+    string chat_name
+    string chat_desc
     bool is_group
     timestamp created_at
 }
@@ -459,8 +463,8 @@ blacklist {
 
 %% Связи
 
-users ||--o{ profiles : "имеет профиль"
-users ||--o{ sessions : "может иметь несколько сессий"
+users ||--|| profiles : "имеет профиль"
+users ||--|| sessions : "может иметь одну сессию"
 users ||--o{ notifications : "получает уведомления"
 users ||--o{ blacklist : "может блокировать других"
 
@@ -472,19 +476,22 @@ channels ||--o{ messages : "содержит сообщения"
 channels ||--o{ channel_members : "имеет участников"
 channels ||--o{ invitations : "может иметь инвайты"
 
+
+
 ```
 ### Описание таблиц
-| Таблица             | Назначение                   | Основные поля                                                                                                               | Ограничения / консистентность                                                                                                                                                       | Связи                                                                     |
-| :------------------ | :--------------------------- | :-------------------------------------------------------------------------------------------------------------------------- | :---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | :------------------------------------------------------------------------ |
-| **users**           | Аккаунт пользователя         | `user_id`, `login`, `email`, `phone`, `password`, `status`, `created_at`, `updated_at`                                      | Все поля NOT NULL, `login < 50`, `email < 30`, `password < 50`, `status` ENUM (`active`, `banned`, `inactive`), `login UNIQUE`, `email UNIQUE`                                      | `1 → N` с `sessions`, `profiles`, `notifications`, `blacklist`            |
-| **sessions**        | Активные сессии              | `session_id`, `user_id`, `token`, `created_at`, `expires_at`                                                                | Все поля NOT NULL, `user_id` существует в `users` (FK), `expires_at > текущей даты` (CHECK), `user_id UNIQUE`, `token UNIQUE`                                                       | `N → 1` с `users`                                                         |
-| **profiles**        | Профили пользователей        | `profile_id`, `user_id`, `nickname`, `tag`, `avatar_path`, `description`, `is_male`, `birthday`, `created_at`, `updated_at` | Все поля NOT NULL, `nickname < 20` и UNIQUE, `description < 200`, `is_male` BOOLEAN или 0/1, `birthday <= текущая дата - 14 лет`, `tag` ENUM (`default`, `vip`, `moderator` и т.д.) | `N → 1` с `users`; `1 → N` с `messages`, `channel_members`, `invitations` |
-| **channels**        | Личные и групповые чаты      | `channel_id`, `chat_name`, `chat_desc`, `is_group`, `created_at`                                                            | Все поля NOT NULL, `chat_name < 20`, `chat_desc < 200`, `created_at <= текущая дата`                                                                                                | `1 → N` с `messages`, `channel_members`, `invitations`                    |
-| **channel_members** | Связь профилей и чатов       | `channel_id`, `profile_id`, `joined_at`                                                                                     | Все поля NOT NULL, `joined_at <= текущая дата`, комбинация `(channel_id, profile_id)` UNIQUE                                                                                        | `M → N` между `profiles` и `channels`                                     |
-| **messages**        | Сообщения в чатах            | `message_id`, `channel_id`, `author_profile_id`, `content`, `message_type`, `created_at`, `updated_at`                      | Все поля NOT NULL, `content < 200`, `message_type` ENUM (`text`, `image`, `voice`, `system`), `created_at <= текущая дата`                                                          | `N → 1` с `profiles`, `channels`                                          |
-| **invitations**     | Приглашения в чаты           | `invite_id`, `channel_id`, `created_by_profile_id`, `code`, `created_at`, `expires_at`                                      | Все поля NOT NULL, `code UNIQUE`, `expires_at > текущая дата`                                                                                                                       | `N → 1` с `profiles` и `channels`                                         |
-| **notifications**   | Уведомления пользователя     | `notification_id`, `user_id`, `notification_type`, `content`, `created_at`, `read_at`                                       | Все поля NOT NULL, `content < 200`, `notification_type` ENUM, `created_at <= текущая дата`, `read_at >= created_at`                                                                 | `N → 1` с `users`                                                         |
-| **blacklist**       | Заблокированные пользователи | `block_id`, `user_id`, `blocked_user_id`, `reason`, `created_at`                                                            | Все поля NOT NULL, `reason < 100`, `created_at <= текущая дата`, `(user_id, blocked_user_id)` UNIQUE                                                                                | `N → 1` с `users` (оба поля)                                              |
+| Таблица             | Назначение                   | Основные поля                                                                                                                                     | Ограничения / консистентность                                                                                                                               | Связи                                                                     | Средний размер записи | QPS   | Пиковый QPS | Объём записи/с (средний) | Объём записи/с (пиковый) |
+| ------------------- | ---------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------- | --------------------- | ----- | ----------- | ------------------------ | ------------------------ |
+| **users**           | Аккаунт пользователя         | `user_id`, `login`, `email`, `phone`, `password`, `status`, `created_at`, `updated_at`                                                            | NOT NULL, `login < 50`, `email < 30`, `password < 50`, `status` ENUM (`active`, `banned`, `inactive`), `login UNIQUE`, `email UNIQUE`                       | `1 → 1` с `profiles`, `sessions`; `1 → N` с `notifications`, `blacklist`  | 134 B                 | 307   | 921         | 41 KB/s                  | 123 KB/s                 |
+| **profiles**        | Профили пользователей        | `profile_id`, `user_id`, `nickname`, `tag`, `avatar_path`, `description`, `is_male`, `birthday`, `is_online`, `about`, `created_at`, `updated_at` | NOT NULL, `nickname < 20` и UNIQUE, `description < 1000`, `is_male` BOOLEAN, `birthday <= текущая дата - 14 лет`, `tag` ENUM (`default`, `vip`, `moderator`) | `N → 1` с `users`; `1 → N` с `messages`, `channel_members`, `invitations` | 345 B                 | 307   | 921         | 106 KB/s                 | 318 KB/s                 |
+| **sessions**        | Активные сессии              | `session_id`, `user_id`, `token`, `created_at`, `expires_at`                                                                                      | NOT NULL, `user_id` FK, `expires_at > текущая дата`, `user_id UNIQUE`, `token UNIQUE`                                                                       | `1 → 1` с `users`                                                         | 74 B                  | 614   | 1 842       | 45 KB/s                  | 137 KB/s                 |
+| **channels**        | Личные и групповые чаты      | `channel_id`, `chat_name`, `chat_desc`, `is_group`, `created_at`                                                                                  | NOT NULL, `chat_name < 20`, `chat_desc < 200`, `is_group` BOOLEAN, `created_at <= текущая дата`                                                             | `1 → N` с `messages`, `channel_members`, `invitations`                    | 133 B                 | 307   | 921         | 41 KB/s                  | 123 KB/s                 |
+| **channel_members** | Связь профилей и чатов       | `channel_id`, `profile_id`, `joined_at`                                                                                                           | NOT NULL, `joined_at <= текущая дата`, `(channel_id, profile_id)` UNIQUE                                                                                    | `M ↔ N` между `profiles` и `channels`                                     | 16 B                  | 307   | 921         | 4.9 KB/s                 | 14.7 KB/s                |
+| **messages**        | Сообщения в чатах            | `message_id`, `channel_id`, `author_profile_id`, `content`, `message_type`, `created_at`, `updated_at`                                            | NOT NULL, `content < 1000`, `message_type` ENUM (`text`, `image`, `voice`, `system`), `created_at <= текущая дата`                                           | `N → 1` с `profiles`, `channels`                                          | 1 056 B               | 9 346 | 28 038      | 9.6 MB/s                 | 28.8 MB/s                |
+| **invitations**     | Приглашения в чаты           | `invite_id`, `channel_id`, `created_by_profile_id`, `code`, `created_at`, `expires_at`                                                            | NOT NULL, `code UNIQUE`, `expires_at > текущая дата`                                                                                                        | `N → 1` с `profiles`, `channels`                                          | 48 B                  | 1 227 | 3 681       | 58 KB/s                  | 174 KB/s                 |
+| **notifications**   | Уведомления пользователя     | `notification_id`, `user_id`, `notification_type`, `content`, `created_at`, `read_at`                                                             | NOT NULL, `content < 200`, `notification_type` ENUM, `created_at <= текущая дата`, `read_at >= created_at`                                                  | `N → 1` с `users`                                                         | 228 B                 | 307   | 921         | 70 KB/s                  | 211 KB/s                 |
+| **blacklist**       | Заблокированные пользователи | `block_id`, `user_id`, `blocked_user_id`, `reason`, `created_at`                                                                                  | NOT NULL, `reason < 100`, `created_at <= текущая дата`, `(user_id, blocked_user_id)` UNIQUE                                                                 | `N → 1` с `users` (оба поля)                                              | 120 B                 | 307   | 921         | 36 KB/s                  | 110 KB/s                 |
+
 
 **Триггеры и консистентности**
 

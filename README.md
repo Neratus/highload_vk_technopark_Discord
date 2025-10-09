@@ -501,21 +501,6 @@ channels ||--o{ invitations : "может иметь инвайты"
 
 3) При удалении пользователя - удалить профиля, сесиии, уведомления
 
-### Нагрузка на запись [Ссылка на расчет](#расчет-нагрузки)
-
-| Таблица             | Поля                                                                                                                               | Средний размер записи | QPS   | Пиковый QPS | Объём записи/с (средний) | Объём записи/с (пиковый) |
-| ------------------- | ---------------------------------------------------------------------------------------------------------------------------------- | --------------------- | ----- | ----------- | ------------------------ | ------------------------ |
-| **users**           | `user_id (4B), login (20B), email (25B), phone (15B), password (50B), status (4B), created_at (8B), updated_at (8B)`               | 134 B                 | 307   | 921         | 41 KB/s                  | 123 KB/s                 |
-| **profiles**        | `profile_id (4B), user_id (4B), nickname (20B), avatar_path (50B), is_online (1B), about (200B), created_at (8B), updated_at (8B)` | 345 B                 | 307   | 921         | 106 KB/s                 | 318 KB/s                 |
-| **sessions**        | `session_id (4B), user_id (4B), token (50B), created_at (8B), expires_at (8B)`                                                     | 74 B                  | 614   | 1 842       | 45 KB/s                  | 137 KB/s                 |
-| **channels**        | `channel_id (4B), name (20B), topic (100B), is_group (1B), created_at (8B)`                                                        | 133 B                 | 307   | 921         | 41 KB/s                  | 123 KB/s                 |
-| **channel_members** | `channel_id (4B), profile_id (4B), joined_at (8B)`                                                                                 | 16 B                  | 307   | 921         | 4.9 KB/s                 | 14.7 KB/s                |
-| **messages**        | `message_id (4B), channel_id (4B), author_profile_id (4B), content (1024B), message_type (4B), created_at (8B), updated_at (8B)`   | 1 056 B               | 9 346 | 28 038      | 9.6 MB/s                 | 28.8 MB/s                |
-| **invitations**     | `invite_id (4B), channel_id (4B), created_by_profile_id (4B), code (20B), created_at (8B), expires_at (8B)`                        | 48 B                  | 1 227 | 3 681       | 58 KB/s                  | 174 KB/s                 |
-| **notifications**   | `notification_id (4B), user_id (4B), content (200B), notification_type (4B), created_at (8B), read_at (8B)`                        | 228 B                 | 307   | 921         | 70 KB/s                  | 211 KB/s                 |
-| **blacklist**       | `block_id (4B), user_id (4B), blocked_user_id (4B), reason (100B), created_at (8B)`                                                | 120 B                 | 307   | 921         | 36 KB/s                  | 110 KB/s                 |
-
-
 
 ## Список источников 
 

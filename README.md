@@ -383,7 +383,7 @@ users {
     string email
     string phone
     string password
-    int status
+    enum status
     timestamp created_at
     timestamp updated_at
 }
@@ -392,7 +392,7 @@ profiles {
     int profile_id PK
     int user_id FK
     string nickname
-    string tag
+    enum tag
     string avatar_path
     string description
     bool is_male
@@ -430,7 +430,7 @@ messages {
     int channel_id FK
     int author_profile_id FK
     string content
-    int message_type
+    enum message_type
     timestamp created_at
     timestamp updated_at
 }
@@ -448,7 +448,7 @@ notifications {
     int notification_id PK
     int user_id FK
     string content
-    int notification_type
+    enum notification_type
     timestamp created_at
     timestamp read_at
 }

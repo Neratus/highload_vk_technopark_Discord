@@ -416,23 +416,41 @@ channels {
     string chat_name
     string chat_desc
     bool is_group
+    int member_count
     timestamp created_at
 }
 
 channel_members {
     int channel_id FK
     int profile_id FK
+    enum role
     timestamp joined_at
+}
+
+subchannels {
+    int subchannel_id PK
+    int parent_channel_id FK
+    string sub_name
+    string description
+    timestamp created_at
 }
 
 messages {
     int message_id PK
-    int channel_id FK
+    int subchannel_id FK
     int author_profile_id FK
     string content
-    enum message_type
+    int static_id FK
     timestamp created_at
     timestamp updated_at
+}
+
+message_reactions {
+    int reaction_id PK
+    int message_id FK
+    int profile_id FK
+    string emoji
+    timestamp created_at
 }
 
 invitations {
@@ -461,36 +479,55 @@ blacklist {
     timestamp created_at
 }
 
+static {
+    int static_id PK
+    enum type
+    string path
+    string mime_type
+    int size_bytes
+    timestamp created_at
+}
+
 %% Связи
 
 users ||--|| profiles : "имеет профиль"
-users ||--|| sessions : "может иметь одну сессию"
+users ||--o{ sessions : "имеет сессии"
 users ||--o{ notifications : "получает уведомления"
 users ||--o{ blacklist : "может блокировать других"
 
-profiles ||--o{ messages : "отправляет сообщения"
 profiles ||--o{ channel_members : "участвует в чатах"
-profiles ||--o{ invitations : "создает приглашения"
+profiles ||--o{ messages : "отправляет сообщения"
+profiles ||--o{ invitations : "создает инвайты"
+profiles ||--o{ message_reactions : "реагирует на сообщения"
 
-channels ||--o{ messages : "содержит сообщения"
+channels ||--o{ subchannels : "имеет подразделы"
 channels ||--o{ channel_members : "имеет участников"
-channels ||--o{ invitations : "может иметь инвайты"
+channels ||--o{ invitations : "имеет приглашения"
+
+subchannels ||--o{ messages : "включает сообщения"
+
+messages ||--o{ message_reactions : "имеет реакции"
+messages ||--|| static : "может ссылаться на медиа"
+
 
 
 
 ```
 ### Описание таблиц
-| Таблица             | Назначение                   | Основные поля                                                                                                                                     | Ограничения / консистентность                                                                                                                               | Связи                                                                     | Средний размер записи | QPS   | Пиковый QPS | Объём записи/с (средний) | Объём записи/с (пиковый) |
-| ------------------- | ---------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------- | --------------------- | ----- | ----------- | ------------------------ | ------------------------ |
-| **users**           | Аккаунт пользователя         | `user_id`, `login`, `email`, `phone`, `password`, `status`, `created_at`, `updated_at`                                                            | NOT NULL, `login < 50`, `email < 30`, `password < 50`, `status` ENUM (`active`, `banned`, `inactive`), `login UNIQUE`, `email UNIQUE`                       | `1 → 1` с `profiles`, `sessions`; `1 → N` с `notifications`, `blacklist`  | 134 B                 | 307   | 921         | 41 KB/s                  | 123 KB/s                 |
-| **profiles**        | Профили пользователей        | `profile_id`, `user_id`, `nickname`, `tag`, `avatar_path`, `description`, `is_male`, `birthday`, `is_online`, `about`, `created_at`, `updated_at` | NOT NULL, `nickname < 20` и UNIQUE, `description < 1000`, `is_male` BOOLEAN, `birthday <= текущая дата - 14 лет`, `tag` ENUM (`default`, `vip`, `moderator`) | `N → 1` с `users`; `1 → N` с `messages`, `channel_members`, `invitations` | 345 B                 | 307   | 921         | 106 KB/s                 | 318 KB/s                 |
-| **sessions**        | Активные сессии              | `session_id`, `user_id`, `token`, `created_at`, `expires_at`                                                                                      | NOT NULL, `user_id` FK, `expires_at > текущая дата`, `user_id UNIQUE`, `token UNIQUE`                                                                       | `1 → 1` с `users`                                                         | 74 B                  | 614   | 1 842       | 45 KB/s                  | 137 KB/s                 |
-| **channels**        | Личные и групповые чаты      | `channel_id`, `chat_name`, `chat_desc`, `is_group`, `created_at`                                                                                  | NOT NULL, `chat_name < 20`, `chat_desc < 200`, `is_group` BOOLEAN, `created_at <= текущая дата`                                                             | `1 → N` с `messages`, `channel_members`, `invitations`                    | 133 B                 | 307   | 921         | 41 KB/s                  | 123 KB/s                 |
-| **channel_members** | Связь профилей и чатов       | `channel_id`, `profile_id`, `joined_at`                                                                                                           | NOT NULL, `joined_at <= текущая дата`, `(channel_id, profile_id)` UNIQUE                                                                                    | `M ↔ N` между `profiles` и `channels`                                     | 16 B                  | 307   | 921         | 4.9 KB/s                 | 14.7 KB/s                |
-| **messages**        | Сообщения в чатах            | `message_id`, `channel_id`, `author_profile_id`, `content`, `message_type`, `created_at`, `updated_at`                                            | NOT NULL, `content < 1000`, `message_type` ENUM (`text`, `image`, `voice`, `system`), `created_at <= текущая дата`                                           | `N → 1` с `profiles`, `channels`                                          | 1 056 B               | 9 346 | 28 038      | 9.6 MB/s                 | 28.8 MB/s                |
-| **invitations**     | Приглашения в чаты           | `invite_id`, `channel_id`, `created_by_profile_id`, `code`, `created_at`, `expires_at`                                                            | NOT NULL, `code UNIQUE`, `expires_at > текущая дата`                                                                                                        | `N → 1` с `profiles`, `channels`                                          | 48 B                  | 1 227 | 3 681       | 58 KB/s                  | 174 KB/s                 |
-| **notifications**   | Уведомления пользователя     | `notification_id`, `user_id`, `notification_type`, `content`, `created_at`, `read_at`                                                             | NOT NULL, `content < 200`, `notification_type` ENUM, `created_at <= текущая дата`, `read_at >= created_at`                                                  | `N → 1` с `users`                                                         | 228 B                 | 307   | 921         | 70 KB/s                  | 211 KB/s                 |
-| **blacklist**       | Заблокированные пользователи | `block_id`, `user_id`, `blocked_user_id`, `reason`, `created_at`                                                                                  | NOT NULL, `reason < 100`, `created_at <= текущая дата`, `(user_id, blocked_user_id)` UNIQUE                                                                 | `N → 1` с `users` (оба поля)                                              | 120 B                 | 307   | 921         | 36 KB/s                  | 110 KB/s                 |
+| Таблица               | Назначение                    | Основные поля                                                                                                         | Ограничения / консистентность                                                                                                          | Связи                                                                | Средний размер записи  | QPS       | Пиковый QPS | Объём записи/с (средний) | Объём записи/с (пиковый) |
+| --------------------- | ----------------------------- | --------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------- | ---------------------- | --------- | ----------- | ------------------------ | ------------------------ |
+| **users**             | Аккаунты пользователей        | `user_id`, `login`, `email`, `phone`, `password`, `status`, `created_at`, `updated_at`                                | `login` и `email` UNIQUE, `status` ENUM (`active`, `banned`, `inactive`, `blocked`), `created_at` и `updated_at` — `CURRENT_TIMESTAMP` | `1→1` с `profiles`, `1→N` с `sessions`, `notifications`, `blacklist` | **132 B**              | **0.1**   | **0.2**     | **13 B/s**               | **26 B/s**               |
+| **profiles**          | Профили пользователей         | `profile_id`, `user_id`, `nickname`, `tag`, `avatar_path`, `description`, `is_male`, `birthday`, `is_online`, `about` | `nickname` UNIQUE, `tag` ENUM (`default`, `vip`, `moderator`), `birthday <= now() - 14 лет`                                            | `N→1` с `users`, `1→N` с `messages`, `channel_members`               | **340 B**              | **0.1**   | **0.2**     | **34 B/s**               | **68 B/s**               |
+| **sessions**          | Активные сессии пользователей | `session_id`, `user_id`, `token`, `created_at`, `expires_at`                                                          | `token` UNIQUE, `expires_at > now()`                                                                                                   | `N→1` с `users`                                                      | **80 B**               | **0.2**   | **0.5**     | **16 B/s**               | **40 B/s**               |
+| **channels**          | Каналы/чаты                   | `channel_id`, `chat_name`, `chat_desc`, `is_group`, `member_count`, `created_at`                                      | `chat_name < 50`, `is_group` BOOLEAN, `member_count >= 0`                                                                              | `1→N` с `channel_members`, `subchannels`, `invitations`              | **128 B**              | **0.05**  | **0.1**     | **6 B/s**                | **12 B/s**               |
+| **channel_members**   | Участники каналов             | `channel_id`, `profile_id`, `role`, `joined_at`                                                                       | `(channel_id, profile_id)` UNIQUE, `role` ENUM (`admin`, `moderator`, `member`)                                                        | `M↔N` между `profiles` и `channels`                                  | **24 B**               | **0.2**   | **0.4**     | **5 B/s**                | **10 B/s**               |
+| **subchannels**       | Подканалы (подчаты)           | `subchannel_id`, `parent_channel_id`, `sub_name`, `description`, `created_at`                                         | `parent_channel_id` FK, `sub_name < 50`, `created_at <= now()`                                                                         | `N→1` с `channels`, `1→N` с `messages`                               | **96 B**               | **0.1**   | **0.2**     | **9.6 B/s**              | **19.2 B/s**             |
+| **messages**          | Сообщения в подканалах        | `message_id`, `subchannel_id`, `author_profile_id`, `content`, `static_id`, `created_at`, `updated_at`                | `content < 1000`, `static_id` FK (nullable), `created_at <= now()`                                                                     | `N→1` с `subchannels`, `profiles`, `static`                          | **1 050 B**            | **9 346** | **28 038**  | **9.6 MB/s**             | **28.8 MB/s**            |
+| **message_reactions** | Реакции к сообщениям          | `reaction_id`, `message_id`, `profile_id`, `emoji`, `created_at`                                                      | `(message_id, profile_id, emoji)` UNIQUE, `emoji < 10`                                                                                 | `N→1` с `messages`, `profiles`                                       | **48 B**               | **1 870** | **5 610**   | **90 KB/s**              | **270 KB/s**             |
+| **invitations**       | Приглашения в каналы          | `invite_id`, `channel_id`, `created_by_profile_id`, `code`, `created_at`, `expires_at`                                | `code` UNIQUE, `expires_at > now()`                                                                                                    | `N→1` с `channels`, `profiles`                                       | **60 B**               | **1.2**   | **3.6**     | **72 B/s**               | **216 B/s**              |
+| **notifications**     | Уведомления пользователей     | `notification_id`, `user_id`, `notification_type`, `content`, `created_at`, `read_at`                                 | `notification_type` ENUM (`system`, `message`, `invite`), `read_at >= created_at`                                                      | `N→1` с `users`                                                      | **220 B**              | **307**   | **921**     | **67 KB/s**              | **201 KB/s**             |
+| **blacklist**         | Заблокированные пользователи  | `block_id`, `user_id`, `blocked_user_id`, `reason`, `created_at`                                                      | `(user_id, blocked_user_id)` UNIQUE, `reason < 100`                                                                                    | `N→1` с `users`                                                      | **110 B**              | **1.5**   | **4.5**     | **165 B/s**              | **495 B/s**              |
+| **static**            | Статические ресурсы           | `static_id`, `type`, `path`, `mime_type`, `size_bytes`, `created_at`                                                  | `type` ENUM (`image`, `audio`, `video`, `document`, `other`), `path` UNIQUE                                                            | `1→N` с `messages`                                                   | **128 B (метаданные)** | **150**   | **450**     | **19 KB/s**              | **57 KB/s**              |
 
 
 **Триггеры и консистентности**

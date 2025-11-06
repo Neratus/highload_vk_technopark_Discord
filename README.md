@@ -709,6 +709,122 @@ friend_requests }|--|| profiles : "получатель"
 | **BigQuery** | Аналитика и обработка триллионов точек данных, ML-фичи. | Традиционные БД не справляются с объёмами и сложными запросами. | Колонночное хранение, serverless архитектура, распределённое выполнение запросов, интеграция с ML. |
 | **Bazaar (Система контроля версий)** | Управление конфигурацией, инфраструктурой как код (IaC), версионирование сервисов. | Конфликты конфигураций, сложность отслеживания изменений. | Distributed version control, оптимизация для бинарных файлов, branching model, code review workflow. |
 | **Coder** | Единая облачная среда разработки. | Долгая настройка окружений и несовместимость между средами. | Автоматическое provisioning cloud environment, Web IDE, remote development через локальные IDE. |
+| **Nginx** | Балансировка нагрузки, кэширование и проксирование API и медиа. | Неравномерная нагрузка и высокая латентность при прямых соединениях. | Обратный прокси с поддержкой **load balancing**, **rate limiting**, **TLS-терминации** и **edge caching**. |
+
+## Схема проекта
+
+```mermaid
+graph TB
+    C[Клиент] --> DNS[Latency-based DNS]
+    DNS --> ANY[Anycast Network]
+    ANY --> L4[L4 Балансировщик]
+    ANY --> L7[L7 Балансировщик]
+    L4 --> NGINX[Nginx]
+    L7 --> NGINX
+    
+    WS[WebSocket Service] --> NGINX
+    NGINX --> API[API Gateway]
+
+    subgraph AUTH_MS[Auth Microservice]
+        AUTH[Auth Service] --> SESSION[Session Service]
+        SESSION --> REDIS[Redis Cluster]
+        AUTH --> USER[User Service]
+        USER --> CASS1[(Cassandra<br/>users/profiles)]
+    end
+    
+    subgraph CHAT_MS[Chat Microservice]
+        CHAT[Chat Service] --> MSG[Message Service]
+        CHAT --> CHANNEL[Channel Service]
+        MSG --> CASS2[(Cassandra<br/>messages)]
+        CHANNEL --> CASS3[(Cassandra<br/>channels)]
+    end
+    
+    subgraph VOICE_MS[Voice Microservice]
+        VOICE[Voice Service] --> JITTER[Adaptive Jitter Buffer]
+        VOICE --> SFU[SFU Router]
+        VOICE --> STATE[State Service]
+        STATE --> CASS4[(Cassandra<br/>voice state)]
+    end
+    
+    subgraph MEDIA_MS[Media Microservice]
+        MEDIA[Media Service] --> CDC[Content-Defined Chunking]
+        MEDIA --> UPLOAD[Upload Service]
+        CDC --> CEPH[(Ceph<br/>media storage)]
+        UPLOAD --> CASS5[(Cassandra<br/>media meta)]
+    end
+    
+    subgraph FRIEND_MS[Friend Microservice]
+        FRIEND[Friend Service] --> REC[Recommendation Engine]
+        FRIEND --> GRAPH[Graph Service]
+        REC --> NEO4J[(Neo4j<br/>social graph)]
+        GRAPH --> NEO4J
+    end
+    
+    subgraph NOTIFY_MS[Notification Microservice]
+        NOTIFY[Notification Service] --> PUSH[Push Service]
+        PUSH --> TARAN[(Tarantool<br/>notifications)]
+        NOTIFY --> REDIS2[Redis<br/>connections]
+    end
+    
+    subgraph INVITE_MS[Invite Microservice]
+        INVITE[Invite Service] --> GENERATOR[Code Service]
+        INVITE --> VALIDATOR[Validation Service]
+        VALIDATOR --> PG1[(PostgreSQL<br/>invitations)]
+    end
+
+    subgraph LOGPACKER_MS[LogPacker]
+        LOG_COLLECTOR[Log Collector] --> PROCESSOR[Log Processor]
+        PROCESSOR --> STORAGE[Log Storage]
+        STORAGE --> LOG_DB[(Elasticsearch)]
+    end
+
+    subgraph METRICS_MS[Metrics Collection]
+        PROM[Prometheus] --> GRAFANA[Grafana]
+        PROM --> BQ[BigQuery]
+    end
+
+    API --> AUTH
+    API --> CHAT
+    API --> VOICE
+    API --> MEDIA
+    API --> FRIEND
+    API --> NOTIFY
+    API --> INVITE
+
+    WS --> NOTIFY
+
+    NOTIFY -.-> REDIS
+
+    KAFKA[Kafka Cluster]
+    CHAT -.-> KAFKA
+    KAFKA -.-> NOTIFY
+    VOICE -.-> KAFKA
+    MEDIA -.-> KAFKA
+    FRIEND -.-> KAFKA
+    INVITE -.-> KAFKA
+    AUTH -.-> KAFKA
+
+    %% Логи в LogPacker
+    AUTH --> LOG_COLLECTOR
+    CHAT --> LOG_COLLECTOR
+    VOICE --> LOG_COLLECTOR
+    MEDIA --> LOG_COLLECTOR
+    FRIEND --> LOG_COLLECTOR
+    NOTIFY --> LOG_COLLECTOR
+    INVITE --> LOG_COLLECTOR
+    WS --> LOG_COLLECTOR
+
+    %% Метрики в Prometheus
+    KAFKA --> PROM
+    AUTH --> PROM
+    CHAT --> PROM
+    VOICE --> PROM
+    MEDIA --> PROM
+    FRIEND --> PROM
+    NOTIFY --> PROM
+    INVITE --> PROM
+
+```
 
 ## Список источников 
 

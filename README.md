@@ -717,10 +717,8 @@ friend_requests }|--|| profiles : "получатель"
 graph TB
     C[Клиент] --> DNS[Latency-based DNS]
     DNS --> ANY[Anycast Network]
-    ANY --> L4[L4 Балансировщик]
-    ANY --> L7[L7 Балансировщик]
-    L4 --> NGINX[Nginx]
-    L7 --> NGINX
+    ANY --> L4/L7
+    L4/L7 --> NGINX[Nginx]
     
     WS[WebSocket Service] --> NGINX
     NGINX --> API[API Gateway]

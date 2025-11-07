@@ -717,110 +717,143 @@ friend_requests }|--|| profiles : "получатель"
 graph TB
     C[Клиент] --> DNS[Latency-based DNS]
     DNS --> ANY[Anycast Network]
-    ANY --> L4/L7
-    L4/L7 --> NGINX[Nginx]
     
-    WS[WebSocket Service] --> NGINX
-    NGINX --> API[API Gateway]
+    ANY --> L4[L4 Load Balancer<br/>Voice Traffic]
+    ANY --> L7[L7 Load Balancer<br/>HTTP Traffic]
+    
+    L4 --> VOICE_API[Voice API]
+    
+    L7 --> API[API Gateway]
+    
+    WS[WebSocket Service] --> L7
 
-    subgraph AUTH_MS[Auth Microservice]
-        AUTH[Auth Service] --> SESSION[Session Service]
-        SESSION --> REDIS[Redis Cluster]
-        AUTH --> USER[User Service]
-        USER --> CASS1[(Cassandra<br/>users/profiles)]
+    subgraph CHAT_SERVICE[Chat Service]
+        CHAT_API[Chat API]
+        
+        CHAT_API --> MSG_MANAGER[Message Manager]
+        CHAT_API --> CHANNEL_MANAGER[Channel Manager]
+        
+        MSG_MANAGER --> UPLOAD_MSG[UploadMessage]
+        UPLOAD_MSG -.-> KAFKA_MSG[Kafka: messages]
+        KAFKA_MSG --> SAVE_MSG[SaveMessage]
+        SAVE_MSG --> CASS_MSG[(Cassandra<br/>messages)]
+        
+        MSG_MANAGER --> READ_MSG[ReadMessage]
+        READ_MSG --> CASS_MSG
+        
+        CHANNEL_MANAGER --> UPLOAD_CHANNEL[UploadChannel]
+        UPLOAD_CHANNEL --> CASS_CHANNELS[(Cassandra<br/>channels)]
+        
+        CHANNEL_MANAGER --> READ_CHANNEL[ReadChannel]
+        READ_CHANNEL --> CASS_CHANNELS
     end
     
-    subgraph CHAT_MS[Chat Microservice]
-        CHAT[Chat Service] --> MSG[Message Service]
-        CHAT --> CHANNEL[Channel Service]
-        MSG --> CASS2[(Cassandra<br/>messages)]
-        CHANNEL --> CASS3[(Cassandra<br/>channels)]
-    end
-    
-    subgraph VOICE_MS[Voice Microservice]
-        VOICE[Voice Service] --> JITTER[Adaptive Jitter Buffer]
-        VOICE --> SFU[SFU Router]
-        VOICE --> STATE[State Service]
-        STATE --> CASS4[(Cassandra<br/>voice state)]
-    end
-    
-    subgraph MEDIA_MS[Media Microservice]
-        MEDIA[Media Service] --> CDC[Content-Defined Chunking]
-        MEDIA --> UPLOAD[Upload Service]
+    subgraph MEDIA_SERVICE[Media Service]
+        MEDIA_API[Media API]
+        
+        MEDIA_API --> UPLOAD_MANAGER[Upload Manager]
+        MEDIA_API --> REACTION_MANAGER[Reaction Manager]
+        MEDIA_API --> AVATAR_MANAGER[Avatar Manager]
+        
+        UPLOAD_MANAGER --> UPLOAD_MEDIA[UploadMedia]
+        UPLOAD_MEDIA -.-> KAFKA_MEDIA[Kafka: media]
+        KAFKA_MEDIA --> SAVE_MEDIA[SaveMedia]
+        SAVE_MEDIA --> CDC[Content-Defined Chunking]
         CDC --> CEPH[(Ceph<br/>media storage)]
-        UPLOAD --> CASS5[(Cassandra<br/>media meta)]
+        CDC --> CASS_MEDIA[(Cassandra<br/>media meta)]
+        
+        %% Аватары
+        AVATAR_MANAGER --> UPLOAD_AVATAR[UploadAvatar]
+        UPLOAD_AVATAR -.-> KAFKA_AVATAR[Kafka: avatars]
+        KAFKA_AVATAR --> SAVE_AVATAR[SaveAvatar]
+        SAVE_AVATAR --> CDC_AVATAR[Content-Defined Chunking]
+        CDC_AVATAR --> CEPH_AVATARS[(Ceph<br/>avatars)]
+        CDC_AVATAR --> CASS_MEDIA
+        
+        %% Реакции
+        REACTION_MANAGER --> UPLOAD_REACTION[UploadReaction]
+        UPLOAD_REACTION --> CASS_REACTIONS[(Cassandra<br/>reactions)]
+        
+        %% Чтение
+        UPLOAD_MANAGER --> READ_MEDIA[ReadMedia]
+        READ_MEDIA --> CASS_MEDIA
+        REACTION_MANAGER --> READ_REACTION[ReadReaction]
+        READ_REACTION --> CASS_REACTIONS
+        AVATAR_MANAGER --> READ_AVATAR[ReadAvatar]
+        READ_AVATAR --> CEPH_AVATARS
+    end
+
+    %% Остальные сервисы
+    subgraph FRIEND_SERVICE[Friend Service]
+        FRIEND_API[Friend API] --> FRIEND_MANAGER[Friend Manager]
+        FRIEND_MANAGER --> UPLOAD_FRIEND[UploadFriend]
+        UPLOAD_FRIEND --> NEO4J[(Neo4j)]
+        
+        FRIEND_API --> GET_RECOMMENDATIONS[GetRecommendations]
+        GET_RECOMMENDATIONS --> REC_ENGINE[Recommendation Engine]
+        REC_ENGINE --> NEO4J
+    end
+
+    subgraph AUTH_SERVICE[Auth Service]
+        AUTH_API[Auth API] --> SESSION_MANAGER[Session Manager]
+        SESSION_MANAGER --> REDIS[(Redis)]
+        AUTH_API --> USER_MANAGER[User Manager]
+        USER_MANAGER --> CASS_USERS[(Cassandra<br/>users)]
     end
     
-    subgraph FRIEND_MS[Friend Microservice]
-        FRIEND[Friend Service] --> REC[Recommendation Engine]
-        FRIEND --> GRAPH[Graph Service]
-        REC --> NEO4J[(Neo4j<br/>social graph)]
-        GRAPH --> NEO4J
+    subgraph VOICE_SERVICE[Voice Service]
+        VOICE_API[Voice API] --> SFU[SFU Router]
+        SFU --> JITTER[Adaptive Jitter Buffer]
+        JITTER --> CODEC[Audio Codec]
+        CODEC --> NETWORK[Network Optimizer]
+        NETWORK --> STATE_MANAGER[State Manager]
+        STATE_MANAGER --> CASS_VOICE[(Cassandra)]
     end
     
-    subgraph NOTIFY_MS[Notification Microservice]
-        NOTIFY[Notification Service] --> PUSH[Push Service]
-        PUSH --> TARAN[(Tarantool<br/>notifications)]
-        NOTIFY --> REDIS2[Redis<br/>connections]
+    subgraph SEARCH_SERVICE[Search Service]
+        SEARCH_API[Search API] --> SEARCH_ENGINE[Search Engine]
+        SEARCH_ENGINE --> ELASTIC[(ElasticSearch)]
     end
     
-    subgraph INVITE_MS[Invite Microservice]
-        INVITE[Invite Service] --> GENERATOR[Code Service]
-        INVITE --> VALIDATOR[Validation Service]
-        VALIDATOR --> PG1[(PostgreSQL<br/>invitations)]
+    subgraph NOTIFY_SERVICE[Notification Service]
+        NOTIFY_API[Notify API] --> PUSH_MANAGER[Push Manager]
+        PUSH_MANAGER --> TARAN[(Tarantool)]
+    end
+    
+    subgraph INVITE_SERVICE[Invite Service]
+        INVITE_API[Invite API] --> INVITE_MANAGER[Invite Manager]
+        INVITE_MANAGER --> UPLOAD_INVITE[UploadInvite]
+        UPLOAD_INVITE -.-> VALIDATION[Validation]
+        VALIDATION --> PG[(PostgreSQL)]
     end
 
-    subgraph LOGPACKER_MS[LogPacker]
-        LOG_COLLECTOR[Log Collector] --> PROCESSOR[Log Processor]
-        PROCESSOR --> STORAGE[Log Storage]
-        STORAGE --> LOG_DB[(Elasticsearch)]
+    subgraph PROFILE_SERVICE[Profile Service]
+        PROFILE_API[Profile API] --> PROFILE_MANAGER[Profile Manager]
+        PROFILE_MANAGER --> CASS_PROFILES[(Cassandra<br/>profiles)]
     end
 
-    subgraph METRICS_MS[Metrics Collection]
-        PROM[Prometheus] --> GRAFANA[Grafana]
-        PROM --> BQ[BigQuery]
-    end
+    API --> AUTH_API
+    API --> CHAT_API
+    API --> MEDIA_API
+    API --> FRIEND_API
+    API --> NOTIFY_API
+    API --> INVITE_API
+    API --> SEARCH_API
+    API --> PROFILE_API
 
-    API --> AUTH
-    API --> CHAT
-    API --> VOICE
-    API --> MEDIA
-    API --> FRIEND
-    API --> NOTIFY
-    API --> INVITE
+    NOTIFY_API -.-> REDIS
 
-    WS --> NOTIFY
+    CHAT_API -.-> SEARCH_API
+    MEDIA_API -.-> SEARCH_API
+    FRIEND_API -.-> CHAT_API
+    AUTH_API -.-> CHAT_API
+    PROFILE_API -.-> FRIEND_API
+    PROFILE_API -.-> MEDIA_API
+    PROFILE_API -.-> SEARCH_API
 
-    NOTIFY -.-> REDIS
-
-    KAFKA[Kafka Cluster]
-    CHAT -.-> KAFKA
-    KAFKA -.-> NOTIFY
-    VOICE -.-> KAFKA
-    MEDIA -.-> KAFKA
-    FRIEND -.-> KAFKA
-    INVITE -.-> KAFKA
-    AUTH -.-> KAFKA
-
-    %% Логи в LogPacker
-    AUTH --> LOG_COLLECTOR
-    CHAT --> LOG_COLLECTOR
-    VOICE --> LOG_COLLECTOR
-    MEDIA --> LOG_COLLECTOR
-    FRIEND --> LOG_COLLECTOR
-    NOTIFY --> LOG_COLLECTOR
-    INVITE --> LOG_COLLECTOR
-    WS --> LOG_COLLECTOR
-
-    %% Метрики в Prometheus
-    KAFKA --> PROM
-    AUTH --> PROM
-    CHAT --> PROM
-    VOICE --> PROM
-    MEDIA --> PROM
-    FRIEND --> PROM
-    NOTIFY --> PROM
-    INVITE --> PROM
+    NGINX[Nginx]
+    MEDIA_API -.-> NGINX
+    PROFILE_API -.-> NGINX
 
 ```
 

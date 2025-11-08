@@ -762,7 +762,6 @@ graph TB
         CDC --> CEPH[(Ceph<br/>media storage)]
         CDC --> CASS_MEDIA[(Cassandra<br/>media meta)]
         
-        %% Аватары
         AVATAR_MANAGER --> UPLOAD_AVATAR[UploadAvatar]
         UPLOAD_AVATAR -.-> KAFKA_AVATAR[Kafka: avatars]
         KAFKA_AVATAR --> SAVE_AVATAR[SaveAvatar]
@@ -770,11 +769,9 @@ graph TB
         CDC_AVATAR --> CEPH_AVATARS[(Ceph<br/>avatars)]
         CDC_AVATAR --> CASS_MEDIA
         
-        %% Реакции
         REACTION_MANAGER --> UPLOAD_REACTION[UploadReaction]
         UPLOAD_REACTION --> CASS_REACTIONS[(Cassandra<br/>reactions)]
         
-        %% Чтение
         UPLOAD_MANAGER --> READ_MEDIA[ReadMedia]
         READ_MEDIA --> CASS_MEDIA
         REACTION_MANAGER --> READ_REACTION[ReadReaction]
@@ -783,7 +780,6 @@ graph TB
         READ_AVATAR --> CEPH_AVATARS
     end
 
-    %% Остальные сервисы
     subgraph FRIEND_SERVICE[Friend Service]
         FRIEND_API[Friend API] --> FRIEND_MANAGER[Friend Manager]
         FRIEND_MANAGER --> UPLOAD_FRIEND[UploadFriend]
@@ -796,7 +792,7 @@ graph TB
 
     subgraph AUTH_SERVICE[Auth Service]
         AUTH_API[Auth API] --> SESSION_MANAGER[Session Manager]
-        SESSION_MANAGER --> REDIS[(Redis)]
+        SESSION_MANAGER --> REDIS_SESSIONS[(Redis<br/>sessions)]
         AUTH_API --> USER_MANAGER[User Manager]
         USER_MANAGER --> CASS_USERS[(Cassandra<br/>users)]
     end
@@ -817,19 +813,31 @@ graph TB
     
     subgraph NOTIFY_SERVICE[Notification Service]
         NOTIFY_API[Notify API] --> PUSH_MANAGER[Push Manager]
+        PUSH_MANAGER --> REDIS_NOTIFY[(Redis<br/>notifications)]
         PUSH_MANAGER --> TARAN[(Tarantool)]
     end
     
     subgraph INVITE_SERVICE[Invite Service]
         INVITE_API[Invite API] --> INVITE_MANAGER[Invite Manager]
         INVITE_MANAGER --> UPLOAD_INVITE[UploadInvite]
-        UPLOAD_INVITE -.-> VALIDATION[Validation]
+        UPLOAD_INVITE --> VALIDATION[Validation]
         VALIDATION --> PG[(PostgreSQL)]
     end
 
     subgraph PROFILE_SERVICE[Profile Service]
         PROFILE_API[Profile API] --> PROFILE_MANAGER[Profile Manager]
         PROFILE_MANAGER --> CASS_PROFILES[(Cassandra<br/>profiles)]
+    end
+
+    subgraph LOGPACKER_MS[LogPacker Service]
+        LOG_COLLECTOR[Log Collector] --> PROCESSOR[Log Processor]
+        PROCESSOR --> STORAGE[Log Storage]
+        STORAGE --> LOG_DB[(Elasticsearch<br/>logs)]
+    end
+
+    subgraph METRICS_MS[Metrics Collection]
+        PROM[Prometheus] --> GRAFANA[Grafana]
+        PROM --> BQ[BigQuery]
     end
 
     API --> AUTH_API
@@ -841,15 +849,15 @@ graph TB
     API --> SEARCH_API
     API --> PROFILE_API
 
-    NOTIFY_API -.-> REDIS
+    WS --> CHAT_API
 
     CHAT_API -.-> SEARCH_API
+    PROFILE_API -.-> SEARCH_API
     MEDIA_API -.-> SEARCH_API
     FRIEND_API -.-> CHAT_API
     AUTH_API -.-> CHAT_API
     PROFILE_API -.-> FRIEND_API
     PROFILE_API -.-> MEDIA_API
-    PROFILE_API -.-> SEARCH_API
 
     NGINX[Nginx]
     MEDIA_API -.-> NGINX

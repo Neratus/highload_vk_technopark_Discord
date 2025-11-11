@@ -734,9 +734,10 @@ graph TB
         CHAT_API --> CHANNEL_MANAGER[Channel Manager]
         
         MSG_MANAGER --> UPLOAD_MSG[UploadMessage]
-        UPLOAD_MSG -.-> KAFKA_MSG[Kafka: messages]
-        KAFKA_MSG --> SAVE_MSG[SaveMessage]
-        SAVE_MSG --> CASS_MSG[(Cassandra<br/>messages)]
+        UPLOAD_MSG -.-> MSG_KAF[Kafka: message]
+        MSG_KAF --> SAVE[SaveMessages]
+        SAVE --> CASS_MSG[(Cassandra<br/>messages)]
+        SAVE -.->|event| KAFKA_MSG[Kafka: update_search]
         
         MSG_MANAGER --> READ_MSG[ReadMessage]
         READ_MSG --> CASS_MSG
@@ -751,26 +752,26 @@ graph TB
     subgraph MEDIA_SERVICE[Media Service]
         MEDIA_API[Media API]
         
-        MEDIA_API --> UPLOAD_MANAGER[Upload Manager]
+        MEDIA_API --> UPLOAD_MANAGER[Media Manager]
         MEDIA_API --> REACTION_MANAGER[Reaction Manager]
         MEDIA_API --> AVATAR_MANAGER[Avatar Manager]
         
         UPLOAD_MANAGER --> UPLOAD_MEDIA[UploadMedia]
-        UPLOAD_MEDIA -.-> KAFKA_MEDIA[Kafka: media]
-        KAFKA_MEDIA --> SAVE_MEDIA[SaveMedia]
-        SAVE_MEDIA --> CDC[Content-Defined Chunking]
+        UPLOAD_MEDIA -.-> SasV[Save Media]
+        SasV --> CDC[Content-Defined Chunking]
         CDC --> CEPH[(Ceph<br/>media storage)]
         CDC --> CASS_MEDIA[(Cassandra<br/>media meta)]
+        UPLOAD_MEDIA -.->|event| KAFKA_MEDIA[Kafka: update_search]
         
         AVATAR_MANAGER --> UPLOAD_AVATAR[UploadAvatar]
-        UPLOAD_AVATAR -.-> KAFKA_AVATAR[Kafka: avatars]
-        KAFKA_AVATAR --> SAVE_AVATAR[SaveAvatar]
-        SAVE_AVATAR --> CDC_AVATAR[Content-Defined Chunking]
+        UPLOAD_AVATAR -.-> SAVEAVATAR[SaveAvatar]
+        SAVEAVATAR --> CDC_AVATAR[Content-Defined Chunking]
         CDC_AVATAR --> CEPH_AVATARS[(Ceph<br/>avatars)]
         CDC_AVATAR --> CASS_MEDIA
         
         REACTION_MANAGER --> UPLOAD_REACTION[UploadReaction]
-        UPLOAD_REACTION --> CASS_REACTIONS[(Cassandra<br/>reactions)]
+        UPLOAD_REACTION -.-> SAVE_REACTION[SaveReaction]
+        SAVE_REACTION --> CASS_REACTIONS[(Cassandra<br/>reactions)]
         
         UPLOAD_MANAGER --> READ_MEDIA[ReadMedia]
         READ_MEDIA --> CASS_MEDIA
@@ -784,10 +785,11 @@ graph TB
         FRIEND_API[Friend API] --> FRIEND_MANAGER[Friend Manager]
         FRIEND_MANAGER --> UPLOAD_FRIEND[UploadFriend]
         UPLOAD_FRIEND --> NEO4J[(Neo4j)]
+        UPLOAD_FRIEND -.->|event| KAFKA_FRIEND[Kafka: update_search]
         
-        FRIEND_API --> GET_RECOMMENDATIONS[GetRecommendations]
-        GET_RECOMMENDATIONS --> REC_ENGINE[Recommendation Engine]
-        REC_ENGINE --> NEO4J
+        FRIEND_API --> GET_RECOMMENDATIONS[GetFriendRecommendation]
+        GET_RECOMMENDATIONS --> COLLAB_FILTERING[Collaborative Filtering]
+        COLLAB_FILTERING --> NEO4J
     end
 
     subgraph AUTH_SERVICE[Auth Service]
@@ -798,17 +800,23 @@ graph TB
     end
     
     subgraph VOICE_SERVICE[Voice Service]
-        VOICE_API[Voice API] --> SFU[SFU Router]
-        SFU --> JITTER[Adaptive Jitter Buffer]
-        JITTER --> CODEC[Audio Codec]
-        CODEC --> NETWORK[Network Optimizer]
-        NETWORK --> STATE_MANAGER[State Manager]
-        STATE_MANAGER --> CASS_VOICE[(Cassandra)]
+        VOICE_API[Voice API] --> CALL_MANAGER[Call Manager]
+        CALL_MANAGER --> SFU[SFU Router]
+        SFU --> AUDIO_PROCESSING[Audio Processing]
+        AUDIO_PROCESSING --> STATE_MANAGER[State Manager]
+        STATE_MANAGER --> CASS_CALLS[(Cassandra<br/>call_state)]
+        
+        CALL_MANAGER --> SIGNALING[Signaling]
+        SIGNALING --> WaS[WebSocket Service]
+        WaS[WebSocket Service] --> VOICE_API
     end
     
     subgraph SEARCH_SERVICE[Search Service]
+        KAFKA_CONSUMER[Kafka: update search] -.-> SEARCH_INDEXDB
+        SEARCH_ENGINE[search index] --> ELASTIC[(ElasticSearch)]
+        SEARCH_ENGINE --> SEARCH_INDEXDB[(Search Index)]
+        
         SEARCH_API[Search API] --> SEARCH_ENGINE[Search Engine]
-        SEARCH_ENGINE --> ELASTIC[(ElasticSearch)]
     end
     
     subgraph NOTIFY_SERVICE[Notification Service]
@@ -820,13 +828,14 @@ graph TB
     subgraph INVITE_SERVICE[Invite Service]
         INVITE_API[Invite API] --> INVITE_MANAGER[Invite Manager]
         INVITE_MANAGER --> UPLOAD_INVITE[UploadInvite]
-        UPLOAD_INVITE --> VALIDATION[Validation]
-        VALIDATION --> PG[(PostgreSQL)]
+        UPLOAD_INVITE -.->|event| KAFKA_INVITE[Kafka: invite_events]
+        KAFKA_INVITE --> VALIDATION[Validation]
+        VALIDATION --> PG[(PostgreSQL<br/>invites)]
     end
 
     subgraph PROFILE_SERVICE[Profile Service]
         PROFILE_API[Profile API] --> PROFILE_MANAGER[Profile Manager]
-        PROFILE_MANAGER --> CASS_PROFILES[(Cassandra<br/>profiles)]
+        PROFILE_MANAGER -.->|event| KAFKA_PROFILE[Kafka: update_search]
     end
 
     subgraph LOGPACKER_MS[LogPacker Service]
@@ -851,6 +860,9 @@ graph TB
 
     WS --> CHAT_API
 
+
+
+    %% Service interconnections
     CHAT_API -.-> SEARCH_API
     PROFILE_API -.-> SEARCH_API
     MEDIA_API -.-> SEARCH_API
@@ -862,7 +874,6 @@ graph TB
     NGINX[Nginx]
     MEDIA_API -.-> NGINX
     PROFILE_API -.-> NGINX
-
 ```
 
 ## Список источников 

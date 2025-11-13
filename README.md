@@ -722,6 +722,10 @@ graph TB
     ANY --> L7[L7 Load Balancer<br/>HTTP Traffic]
     
     L4 --> VOICE_API[Voice API]
+
+    HEALTH[Health Checker] --> API
+    HEALTH[Health Checker] --> L7
+     HEALTH[Health Checker] --> L4
     
     L7 --> API[API Gateway]
     
@@ -737,12 +741,14 @@ graph TB
         UPLOAD_MSG -.-> MSG_KAF[Kafka: message]
         MSG_KAF --> SAVE[SaveMessages]
         SAVE --> CASS_MSG[(Cassandra<br/>messages)]
+        SAVE -.-> Tarantool_Messages[(Tarantool<br/> recent messages)]
         SAVE -.->|event| KAFKA_MSG[Kafka: update_search]
         
         MSG_MANAGER --> READ_MSG[ReadMessage]
         READ_MSG --> CASS_MSG
         
         CHANNEL_MANAGER --> UPLOAD_CHANNEL[UploadChannel]
+        UPLOAD_CHANNEL -.-> Tarantool_channels[(Tarantool<br/> recent channels)]
         UPLOAD_CHANNEL --> CASS_CHANNELS[(Cassandra<br/>channels)]
         
         CHANNEL_MANAGER --> READ_CHANNEL[ReadChannel]
@@ -758,16 +764,26 @@ graph TB
         
         UPLOAD_MANAGER --> UPLOAD_MEDIA[UploadMedia]
         UPLOAD_MEDIA -.-> SasV[Save Media]
-        SasV --> CDC[Content-Defined Chunking]
-        CDC --> CEPH[(Ceph<br/>media storage)]
-        CDC --> CASS_MEDIA[(Cassandra<br/>media meta)]
+        SasV --> OUT[(Cassandra<br/> messages)]
+        OUT -.-> Process_Media[Process media]
+        Process_Media --> CDC_MEDIA[Content-Defined Chunking]
+        Process_Media -.-> SasV
+        CDC_MEDIA --> CEPH[(Ceph<br/>media storage)]
+        CDC_MEDIA --> OUT
+        SasV -->  CASS_MEDIA[(Cassandra<br/>media meta)]
         UPLOAD_MEDIA -.->|event| KAFKA_MEDIA[Kafka: update_search]
         
         AVATAR_MANAGER --> UPLOAD_AVATAR[UploadAvatar]
         UPLOAD_AVATAR -.-> SAVEAVATAR[SaveAvatar]
-        SAVEAVATAR --> CDC_AVATAR[Content-Defined Chunking]
+        SAVEAVATAR --> OUT_av[(Cassandra<br/> messages)]
+        OUT_av -.-> Process_Avatar[Process avatar]
+        Process_Avatar --> CDC_AVATAR[Content-Defined Chunking]
+        Process_Avatar -.-> SAVEAVATAR
+
         CDC_AVATAR --> CEPH_AVATARS[(Ceph<br/>avatars)]
-        CDC_AVATAR --> CASS_MEDIA
+        CDC_AVATAR --> OUT_av
+
+        SAVEAVATAR --> CASS_MEDI[(Cassandra<br/>avatar meta)]
         
         REACTION_MANAGER --> UPLOAD_REACTION[UploadReaction]
         UPLOAD_REACTION -.-> SAVE_REACTION[SaveReaction]
@@ -794,7 +810,7 @@ graph TB
 
     subgraph AUTH_SERVICE[Auth Service]
         AUTH_API[Auth API] --> SESSION_MANAGER[Session Manager]
-        SESSION_MANAGER --> REDIS_SESSIONS[(Redis<br/>sessions)]
+        SESSION_MANAGER --> REDIS_SESSIONS[(Tarantool<br/>sessions)]
         AUTH_API --> USER_MANAGER[User Manager]
         USER_MANAGER --> CASS_USERS[(Cassandra<br/>users)]
     end
@@ -821,7 +837,7 @@ graph TB
     
     subgraph NOTIFY_SERVICE[Notification Service]
         NOTIFY_API[Notify API] --> PUSH_MANAGER[Push Manager]
-        PUSH_MANAGER --> REDIS_NOTIFY[(Redis<br/>notifications)]
+        PUSH_MANAGER --> Tarantool_NOTIFY[(Tarantool<br/> recent notifications)]
         PUSH_MANAGER --> TARAN[(Tarantool)]
     end
     
@@ -835,6 +851,8 @@ graph TB
 
     subgraph PROFILE_SERVICE[Profile Service]
         PROFILE_API[Profile API] --> PROFILE_MANAGER[Profile Manager]
+        PROFILE_MANAGER --> Profile_DB[(Cassandra<br/>profiles)]
+        PROFILE_MANAGER -.-> Tarantool_Profile[(Tarantool<br/> recent profiles)]
         PROFILE_MANAGER -.->|event| KAFKA_PROFILE[Kafka: update_search]
     end
 
@@ -859,8 +877,6 @@ graph TB
     API --> PROFILE_API
 
     WS --> CHAT_API
-
-
 
     CHAT_API -.-> SEARCH_API
     PROFILE_API -.-> SEARCH_API

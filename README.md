@@ -862,7 +862,6 @@ graph TB
 
 
 
-    %% Service interconnections
     CHAT_API -.-> SEARCH_API
     PROFILE_API -.-> SEARCH_API
     MEDIA_API -.-> SEARCH_API
@@ -875,6 +874,9 @@ graph TB
     MEDIA_API -.-> NGINX
     PROFILE_API -.-> NGINX
 ```
+
+## Обеспечение надежности
+
 
 ## Список источников 
 

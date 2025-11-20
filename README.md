@@ -429,8 +429,8 @@ profiles {
 
 friends {
     int friendship_id PK
-    int profile_id_1 FK
-    int profile_id_2 FK
+    int user_id_1 FK
+    int user_id_2 FK
     enum friendship_status
     int interaction_score
     timestamp created_at
@@ -440,12 +440,22 @@ friends {
 
 friend_requests {
     int request_id PK
-    int from_profile_id FK
-    int to_profile_id FK
+    int from_user_id FK
+    int to_user_id FK
     enum request_status
     string message
     timestamp created_at
     timestamp responded_at
+}
+
+friends_recomend {
+    int recommendation_id PK
+    int user_id FK
+    int recommended_user_id FK
+    float similarity_score
+    int common_friends
+    int common_servers
+    timestamp created_at
 }
 
 sessions {
@@ -538,9 +548,10 @@ users ||--|| profiles : "имеет профиль"
 users ||--o{ sessions : "имеет сессии"
 users ||--o{ notifications : "получает уведомления"
 users ||--o{ blacklist : "может блокировать других"
+users ||--o{ friends : "участвует в дружбе"
+users ||--o{ friend_requests : "участвует в запросах"
+users ||--o{ friends_recomend : "получает рекомендации"
 
-profiles ||--o{ friends : "дружит с"
-profiles ||--o{ friend_requests : "отправляет/получает запросы"
 profiles ||--o{ channel_members : "участвует в чатах"
 profiles ||--o{ messages : "отправляет сообщения"
 profiles ||--o{ invitations : "создает инвайты"
@@ -555,11 +566,12 @@ subchannels ||--o{ messages : "включает сообщения"
 messages ||--o{ message_reactions : "имеет реакции"
 messages o{--|| static : "может ссылаться на медиа"
 
-friends }|--|| profiles : "связано с профилем 1"
-friends }|--|| profiles : "связано с профилем 2"
+friend_requests }|--|| users : "отправитель"
+friend_requests }|--|| users : "получатель"
 
-friend_requests }|--|| profiles : "отправитель"
-friend_requests }|--|| profiles : "получатель"
+friends_recomend }|--|| users : "для пользователя"
+friends_recomend }|--|| users : "рекомендуемый пользователь"
+
 
 ```
 ## Физическая схема БД
@@ -567,19 +579,21 @@ friend_requests }|--|| profiles : "получатель"
 
 
 ### Описание таблиц
+### Описание таблиц
 | Таблица               | Назначение             | Основные поля                                                                                                              | Ограничения / консистентность                                                                      | Связи                                                    | Средний размер записи | QPS   | Пиковый QPS | Объём записи/с (средний) | Объём записи/с (пиковый) |
 | --------------------- | ---------------------- | -------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------- | -------------------------------------------------------- | --------------------- | ----- | ----------- | ------------------------ | ------------------------ |
 | **users**             | Аккаунты пользователей | user_id, login, email, phone, password, status, created_at, updated_at                                                     | login и email UNIQUE, status ENUM (active, banned, inactive, blocked)                              | 1→1 с profiles, 1→N с sessions, notifications, blacklist | 132 B                 | 0.1   | 0.2         | 13 B/s                   | 26 B/s                   |
 | **profiles**          | Профили пользователей  | profile_id, user_id, nickname, tag, avatar_path, description, is_male, birthday, is_online, about, created_at, updated_at  | nickname UNIQUE, tag ENUM (default, vip, moderator), birthday <= now() - 14 лет                    | N→1 с users, 1→N с messages, channel_members, friends    | 360 B                 | 0.1   | 0.2         | 36 B/s                   | 72 B/s                   |
-| **friends**           | Дружеские связи        | friendship_id, profile_id_1, profile_id_2, friendship_status, interaction_score, created_at, accepted_at, last_interaction | (profile_id_1, profile_id_2) UNIQUE, friendship_status ENUM (pending, accepted, rejected, blocked) | M↔N между profiles                                       | 64 B                  | 2.0   | 6.0         | 128 B/s                  | 384 B/s                  |
-| **friend_requests**   | Запросы в друзья       | request_id, from_profile_id, to_profile_id, request_status, message, created_at, responded_at                              | (from_profile_id, to_profile_id) UNIQUE, request_status ENUM (pending, accepted, declined)         | N→1 с profiles                                           | 80 B                  | 1.5   | 4.5         | 120 B/s                  | 360 B/s                  |
+| **friends**           | Дружеские связи        | friendship_id, user_id_1, user_id_2, friendship_status, interaction_score, created_at, accepted_at, last_interaction       | (user_id_1, user_id_2) UNIQUE, friendship_status ENUM (pending, accepted, rejected, blocked)       | M↔N между users                                         | 64 B                  | 2.0   | 6.0         | 128 B/s                  | 384 B/s                  |
+| **friend_requests**   | Запросы в друзья       | request_id, from_user_id, to_user_id, request_status, message, created_at, responded_at                                    | (from_user_id, to_user_id) UNIQUE, request_status ENUM (pending, accepted, declined)               | N→1 с users                                              | 80 B                  | 1.5   | 4.5         | 120 B/s                  | 360 B/s                  |
+| **friends_recomend**  | Рекомендации друзей    | recommendation_id, user_id, recommended_user_id, similarity_score, common_friends, common_servers, created_at              | (user_id, recommended_user_id) UNIQUE, similarity_score BETWEEN 0 AND 1                            | N→1 с users                                              | 72 B                  | 0.8   | 2.4         | 58 B/s                   | 173 B/s                  |
 | **sessions**          | Активные сессии        | session_id, user_id, token, created_at, expires_at                                                                         | token UNIQUE, expires_at > now()                                                                   | N→1 с users                                              | 80 B                  | 0.2   | 0.5         | 16 B/s                   | 40 B/s                   |
 | **channels**          | Каналы / чаты          | channel_id, chat_name, chat_desc, is_group, member_count, created_at                                                       | chat_name < 50, is_group BOOLEAN, member_count >= 0                                                | 1→N с channel_members, subchannels, invitations          | 128 B                 | 0.05  | 0.1         | 6 B/s                    | 12 B/s                   |
-| **channel_members**   | Участники каналов      | channel_id, profile_id, role, joined_at                                                                                    | (channel_id, profile_id) UNIQUE, role ENUM (admin, moderator, member)                              | M↔N между profiles и channels                            | 24 B                  | 0.2   | 0.4         | 5 B/s                    | 10 B/s                   |
+| **channel_members**   | Участники каналов      | channel_id, user_id, role, joined_at                                                                                       | (channel_id, user_id) UNIQUE, role ENUM (admin, moderator, member)                                 | M↔N между users и channels                               | 24 B                  | 0.2   | 0.4         | 5 B/s                    | 10 B/s                   |
 | **subchannels**       | Подканалы              | subchannel_id, parent_channel_id, sub_name, description, created_at                                                        | parent_channel_id FK, sub_name < 50                                                                | N→1 с channels, 1→N с messages                           | 96 B                  | 0.1   | 0.2         | 9.6 B/s                  | 19.2 B/s                 |
-| **messages**          | Сообщения              | message_id, subchannel_id, author_profile_id, content, static_id, created_at, updated_at                                   | content < 1000, static_id FK (nullable)                                                            | N→1 с subchannels, profiles, static                      | 1 050 B               | 9 346 | 28 038      | 9.6 MB/s                 | 28.8 MB/s                |
-| **message_reactions** | Реакции                | reaction_id, message_id, profile_id, emoji, created_at                                                                     | (message_id, profile_id, emoji) UNIQUE, emoji < 10                                                 | N→1 с messages, profiles                                 | 48 B                  | 1 870 | 5 610       | 90 KB/s                  | 270 KB/s                 |
-| **invitations**       | Приглашения            | invite_id, channel_id, created_by_profile_id, code, created_at, expires_at                                                 | code UNIQUE, expires_at > now()                                                                    | N→1 с channels, profiles                                 | 60 B                  | 1.2   | 3.6         | 72 B/s                   | 216 B/s                  |
+| **messages**          | Сообщения              | message_id, subchannel_id, author_user_id, content, static_id, created_at, updated_at                                      | content < 1000, static_id FK (nullable)                                                            | N→1 с subchannels, users, static                         | 1 050 B               | 9 346 | 28 038      | 9.6 MB/s                 | 28.8 MB/s                |
+| **message_reactions** | Реакции                | reaction_id, message_id, user_id, emoji, created_at                                                                        | (message_id, user_id, emoji) UNIQUE, emoji < 10                                                    | N→1 с messages, users                                    | 48 B                  | 1 870 | 5 610       | 90 KB/s                  | 270 KB/s                 |
+| **invitations**       | Приглашения            | invite_id, channel_id, created_by_user_id, code, created_at, expires_at                                                    | code UNIQUE, expires_at > now()                                                                    | N→1 с channels, users                                    | 60 B                  | 1.2   | 3.6         | 72 B/s                   | 216 B/s                  |
 | **notifications**     | Уведомления            | notification_id, user_id, notification_type, content, created_at, read_at                                                  | notification_type ENUM (system, message, invite, friend_request)                                   | N→1 с users                                              | 220 B                 | 307   | 921         | 67 KB/s                  | 201 KB/s                 |
 | **blacklist**         | Блокировки             | block_id, user_id, blocked_user_id, reason, created_at                                                                     | (user_id, blocked_user_id) UNIQUE, reason < 100                                                    | N→1 с users                                              | 110 B                 | 1.5   | 4.5         | 165 B/s                  | 495 B/s                  |
 | **static**            | Статические ресурсы    | static_id, type, path, mime_type, size_bytes, created_at                                                                   | type ENUM (image, audio, video, document, other), path UNIQUE                                      | 1→N с messages                                           | 128 B                 | 150   | 450         | 19 KB/s                  | 57 KB/s                  |
@@ -591,15 +605,14 @@ friend_requests }|--|| profiles : "получатель"
 2) При удалении чатов - удалить сообщения, приглашения
 
 3) При удалении пользователя - удалить профиля, сесиии, уведомления
-
-
 ### Распределение СУБД и ожидаемая нагрузка
 | Таблица / Сущность | СУБД              | Назначение               | Чтение QPS    | Запись QPS    | Обоснование выбора             |
 | ------------------ | ----------------- | ------------------------ | ------------- | ------------- | ------------------------------ |
 | users              | **Cassandra**     | Регистрация, авторизация | Среднее       | Низкое        | Масштабируемость               |
 | profiles           | **Cassandra**     | Профили пользователей    | Среднее       | Среднее       | Привязка к пользователю        |
-| friends            | **Neo4j**         | Социальный граф          | Высокое       | Среднее       | Нативные графовые операции     |
-| friend_requests    | **Cassandra**     | Запросы в друзья         | Среднее       | Среднее       | Временные данные               |
+| friends            | **PostgreSQL**    | Хранение друзей          | Высокое       | Высокое       | ACID-гарантии, транзакционность|
+| friend_requests    | **PostgreSQL**    | Хранение предложений     | Высокое       | Высокое       | Консистентность операций       |
+| friends_recomend   | **Neo4j**         | Социальный граф          | Среднее       | Низкое        | Нативные графовые операции     |
 | sessions           | **Tarantool**     | Активные сессии          | Очень высокое | Высокое       | In-memory доступ               |
 | channels           | **Cassandra**     | Список каналов           | Среднее       | Среднее       | Масштабируемость               |
 | subchannels        | **Cassandra**     | Подканалы                | Среднее       | Среднее       | Связи с каналами               |
@@ -613,17 +626,15 @@ friend_requests }|--|| profiles : "получатель"
 | media_storage      | **Ceph**          | Объектное хранилище      | Среднее       | Среднее       | Горизонтальное масштабирование |
 | analytics          | **Prometheus**    | Метрики                  | Высокое       | Низкое        | Временные ряды                 |
 
-
-
-
 ### Индексы
 
 | Таблица           | Индексы                                               | Назначение              |
 | ----------------- | ----------------------------------------------------- | ----------------------- |
 | users             | (user_id), (login), (email)                           | Быстрая авторизация     |
 | profiles          | (user_id), (nickname)                                 | Поиск профилей          |
-| friends           | (profile_id_1, profile_id_2), (friendship_status)     | Поиск друзей и статусов |
-| friend_requests   | (from_profile_id), (to_profile_id), (request_status)  | Управление запросами    |
+| friends           | (user_id_1, user_id_2), (user_id_1, status), (user_id_2, status) | Быстрый поиск друзей    |
+| friend_requests   | (from_user_id), (to_user_id), (to_user_id, status)    | Управление запросами    |
+| friends_recomend  | (user_id), (similarity_score)                         | Рекомендации друзей     |
 | sessions          | (token), (user_id), (expires_at)                      | Поиск сессий            |
 | messages          | (subchannel_id, created_at DESC), (author_profile_id) | История сообщений       |
 | message_reactions | (message_id), (profile_id)                            | Подсчёт реакций         |
@@ -633,19 +644,16 @@ friend_requests }|--|| profiles : "получатель"
 | static            | (static_id), (type)                                   | Поиск ресурсов          |
 | search_index      | inverted_index(content), TF-IDF(content)              | Полнотекстовый поиск    |
 
-
-
 ### Репликации
 
 | СУБД / Подсистема | Таблицы / Сущности                                                                         | Тип репликации             | Кол-во реплик | Обоснование и назначение                                       |
 | ----------------- | ------------------------------------------------------------------------------------------ | -------------------------- | ------------- | -------------------------------------------------------------- |
-| **PostgreSQL**    | `users`, `profiles`, `invitations`, `static`                                               | Master → Standby (async)   | 1–2           | Повышение отказоустойчивости и разгрузка чтения.               |
+| **PostgreSQL**    | `friends`, `friend_requests`, `invitations`, `static`                                      | Master → Standby (async)   | 1–2           | ACID-гарантии для социальных операций                          |
 | **Cassandra**     | `blacklist`, `channels`, `subchannels`, `channel_members`, `messages`, `message_reactions` | Multi-master (eventual)    | 3             | Высокая доступность и равномерное распределение нагрузки.      |
+| **Neo4j**         | `friends_recomend`                                                                         | Master-Replica             | 2             | Графовые рекомендации с отказоустойчивостью                    |
 | **Tarantool**     | `sessions`, `notifications`                                                                | Master–Master (in-memory)  | 2–3           | Минимальная задержка и мгновенное восстановление данных.       |
 | **Ceph**          | `media_storage`, `static` (объектное хранилище)                                            | Erasure coding / CRUSH map | 3–5           | Хранение с дублированием и автоматическим восстановлением.     |
 | **Prometheus**    | `analytics`                                                                                | Snapshot replication       | 1             | Репликация метрик для долгосрочного хранения и резервирования. |
-
-
 
 ### Шардирование
 
@@ -653,17 +661,19 @@ friend_requests }|--|| profiles : "получатель"
 | --------------------- | ----------------- | ---------------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
 | **users**             | `user_id`         | `MOD(user_id, N)`      | Пользователи равномерно распределяются по шардам. Балансировка по числу пользователей, ключ уникален.                               |
 | **profiles**          | `user_id`         | `MOD(user_id, N)`      | Привязка к пользователю, данные профиля логически связаны с users, обеспечивается локальность данных.                               |
+| **friends**           | `user_id_1`       | `MOD(user_id_1, N)`    | Распределение по первому пользователю в паре друзей для быстрого поиска друзей пользователя                                         |
+| **friend_requests**   | `from_user_id`    | `MOD(from_user_id, N)` | Распределение по отправителю запроса для эффективного управления исходящими запросами                                              |
+| **friends_recomend**  | `user_id`         | `MOD(user_id, N)`      | Рекомендации шардируются по пользователю для локальности данных                                                                    |
 | **sessions**          | `user_id`         | `HASH(user_id) % N`    | Сессии распределяются по пользователям. Быстрый доступ in-memory без пересечений.                                                   |
 | **blacklist**         | `user_id`         | `HASH(user_id) % N`    | Запросы ориентированы на поиск блокировок по пользователю. Хэш-шардирование обеспечивает равномерное распределение и независимость. |
 | **notifications**     | `user_id`         | `MOD(user_id, N)`      | Уведомления привязаны к пользователю. Простое деление по остатку для предсказуемости и равномерного распределения.                  |
 | **channels**          | `channel_id`      | `HASH(channel_id) % N` | Каналы независимо масштабируются, данные распределяются по хэш-ключу для минимизации коллизий.                                      |
-| **subchannels**       | `channel_id`      | `HASH(channel_id) % N` | Подканалы логически связаны с каналами, размещаются на тех же шардах для ускорения запросов.                                        |
+| **subchannels**       | `channel_id`      | `HASH(channel_id) % N` | Подканалы логически связаны с каналами, размещаются на тех же шардам для ускорения запросов.                                        |
 | **channel_members**   | `channel_id`      | `HASH(channel_id) % N` | Члены канала хранятся совместно с самим каналом для ускорения выборок и агрегации.                                                  |
 | **messages**          | `chat_id`         | `HASH(chat_id) % N`    | Сообщения группируются по чату. Распределение по хэшу обеспечивает низкую задержку и независимость каналов.                         |
 | **message_reactions** | `message_id`      | `HASH(message_id) % N` | Реакции хранятся рядом с сообщениями, выборка по message_id. Логическая близость и равномерное распределение.                       |
 | **static**            | `static_id`       | `MOD(static_id, N)`    | Метаданные распределяются по ID для горизонтального масштабирования.                                                                |
 | **invitations**       | `user_id`         | `MOD(user_id, N)`      | Распределение по пользователю-отправителю, что снижает конкуренцию при массовых приглашениях.                                       |
-
 
 ### Резервное копирование
 
@@ -690,7 +700,6 @@ friend_requests }|--|| profiles : "получатель"
 
 
 
-## Технологии 
 ## Технологии
 
 | Технология | Применение в Discord | Решаемая проблема | Принцип работы |
@@ -737,11 +746,9 @@ graph TB
         CHAT_API --> MSG_MANAGER[Message Manager]
         CHAT_API --> CHANNEL_MANAGER[Channel Manager]
         
-        MSG_MANAGER --> UPLOAD_MSG[UploadMessage]
-        UPLOAD_MSG -.-> MSG_KAF[Kafka: message]
+        MSG_MANAGER -.-> MSG_KAF[Kafka: message]
         MSG_KAF --> SAVE[SaveMessages]
         SAVE --> CASS_MSG[(Cassandra<br/>messages)]
-        SAVE -.-> Tarantool_Messages[(Tarantool<br/> recent messages)]
         SAVE -.->|event| KAFKA_MSG[Kafka: update_search]
         
         MSG_MANAGER --> READ_MSG[ReadMessage]
@@ -762,50 +769,62 @@ graph TB
         MEDIA_API --> REACTION_MANAGER[Reaction Manager]
         MEDIA_API --> AVATAR_MANAGER[Avatar Manager]
         
-        UPLOAD_MANAGER --> UPLOAD_MEDIA[UploadMedia]
-        UPLOAD_MEDIA -.-> SasV[Save Media]
-        SasV --> OUT[(Cassandra<br/> messages)]
-        OUT -.-> Process_Media[Process media]
-        Process_Media --> CDC_MEDIA[Content-Defined Chunking]
-        Process_Media -.-> SasV
-        CDC_MEDIA --> CEPH[(Ceph<br/>media storage)]
-        CDC_MEDIA --> OUT
-        SasV -->  CASS_MEDIA[(Cassandra<br/>media meta)]
-        UPLOAD_MEDIA -.->|event| KAFKA_MEDIA[Kafka: update_search]
+        UPLOAD_MANAGER -.-> SAVEMEDIA[SaveMedia]
+        SAVEMEDIA --> CASS_MEDIAMETA[(Cassandra<br/>media metameta<br/>outbox)]
+        CASS_MEDIAMETA -.-> PROCESS_MEDIA[Media worker]
+        PROCESS_MEDIA --> CDC_MEDIA[Content-Defined Chunking]
+        PROCESS_MEDIA -.-> SAVEMEDIA
+        CDC_MEDIA --> CEPH_MEDIA[(Ceph<br/>media storage)]
+        CDC_MEDIA --> CASS_MEDIAMETA
         
-        AVATAR_MANAGER --> UPLOAD_AVATAR[UploadAvatar]
-        UPLOAD_AVATAR -.-> SAVEAVATAR[SaveAvatar]
-        SAVEAVATAR --> OUT_av[(Cassandra<br/> messages)]
-        OUT_av -.-> Process_Avatar[Process avatar]
-        Process_Avatar --> CDC_AVATAR[Content-Defined Chunking]
-        Process_Avatar -.-> SAVEAVATAR
-
+        AVATAR_MANAGER -.-> SAVEAVATAR[SaveAvatar]
+        SAVEAVATAR --> CASS_AVATARMETA[(Cassandra<br/>avatar meta<br/>outbox)]
+        CASS_AVATARMETA -.-> PROCESS_AVATAR[Avatar worker]
+        PROCESS_AVATAR --> CDC_AVATAR[Content-Defined Chunking]
+        PROCESS_AVATAR -.-> SAVEAVATAR
         CDC_AVATAR --> CEPH_AVATARS[(Ceph<br/>avatars)]
-        CDC_AVATAR --> OUT_av
-
-        SAVEAVATAR --> CASS_MEDI[(Cassandra<br/>avatar meta)]
+        CDC_AVATAR --> CASS_AVATARMETA
         
         REACTION_MANAGER --> UPLOAD_REACTION[UploadReaction]
         UPLOAD_REACTION -.-> SAVE_REACTION[SaveReaction]
         SAVE_REACTION --> CASS_REACTIONS[(Cassandra<br/>reactions)]
         
         UPLOAD_MANAGER --> READ_MEDIA[ReadMedia]
-        READ_MEDIA --> CASS_MEDIA
+        READ_MEDIA --> CASS_MEDIAMETA
         REACTION_MANAGER --> READ_REACTION[ReadReaction]
         READ_REACTION --> CASS_REACTIONS
         AVATAR_MANAGER --> READ_AVATAR[ReadAvatar]
-        READ_AVATAR --> CEPH_AVATARS
+        READ_AVATAR --> CASS_AVATARMETA
     end
 
     subgraph FRIEND_SERVICE[Friend Service]
         FRIEND_API[Friend API] --> FRIEND_MANAGER[Friend Manager]
+        FRIEND_API --> REQUEST_MANAGER[Request Manager]
+
         FRIEND_MANAGER --> UPLOAD_FRIEND[UploadFriend]
-        UPLOAD_FRIEND --> NEO4J[(Neo4j)]
-        UPLOAD_FRIEND -.->|event| KAFKA_FRIEND[Kafka: update_search]
-        
+        UPLOAD_FRIEND -.-> POSTGRES_FRIENDS
+
+        UPDATE_REQUEST -.-> FRIEND_MANAGER
+
+        REQUEST_MANAGER -.-> UPLOAD_REQUEST[UploadRequest]
+        UPLOAD_REQUEST --> POSTGRES_FRIENDS[(PostgreSQL<br/>friend_requests<br/>friends<br/>outbox)]
+
+        REQUEST_MANAGER -.-> UPDATE_REQUEST[UpdateRequest]
+        UPDATE_REQUEST --> POSTGRES_FRIENDS
+
         FRIEND_API --> GET_RECOMMENDATIONS[GetFriendRecommendation]
+        GET_RECOMMENDATIONS -.-> POSTGRES_FRIENDS
         GET_RECOMMENDATIONS --> COLLAB_FILTERING[Collaborative Filtering]
-        COLLAB_FILTERING --> NEO4J
+        COLLAB_FILTERING -->  NEO4J[(Neo4j<br/>friends_recomend)]
+        UPLOAD_FRIEND -.->  NEO4J[(Neo4j<br/>friends_recomend)]
+    
+        FRIEND_MANAGER --> READ_FRIENDS[ReadFriends]
+        READ_FRIENDS --> POSTGRES_FRIENDS
+        REQUEST_MANAGER --> READ_REQUESTS[ReadFriendRequests]
+        READ_REQUESTS --> POSTGRES_FRIENDS
+    
+        UPLOAD_FRIEND -.->|event| KAFKA_FRIEND[Kafka: update_search]
+        UPLOAD_FRIEND -.-> POSTGRES_FRIENDS
     end
 
     subgraph AUTH_SERVICE[Auth Service]
@@ -843,8 +862,7 @@ graph TB
     
     subgraph INVITE_SERVICE[Invite Service]
         INVITE_API[Invite API] --> INVITE_MANAGER[Invite Manager]
-        INVITE_MANAGER --> UPLOAD_INVITE[UploadInvite]
-        UPLOAD_INVITE -.->|event| KAFKA_INVITE[Kafka: invite_events]
+        INVITE_MANAGER -.->|event| KAFKA_INVITE[Kafka: invite_events]
         KAFKA_INVITE --> VALIDATION[Validation]
         VALIDATION --> PG[(PostgreSQL<br/>invites)]
     end
@@ -901,9 +919,9 @@ graph TB
 - Обработка инвайтов
 - Обновление поискового индекса
 
-Для операций загрузки аватаров и изображений используется паттерн Outbox, который обеспечивает атомарную фиксацию метаданных файлов в Cassandra с последующей асинхронной обработкой через Content-Defined Chunking и сохранением в Ceph, гарантируя консистентность данных и идемпотентность операций при сбоях.
+Для операций загрузки аватаров и изображений используется паттерн Outbox, который обеспечивает атомарную фиксацию метаданных файлов в Cassandra с последующей асинхронной обработкой и сохранением в Ceph, гарантируя консистентность данных и идемпотентность операций при сбоях.
 
-Асинхронный подход обеспечивает значительное снижение задержек за счет немедленного ответа клиенту без ожидания полной обработки операций, гарантированную доставку сообщений даже при временной недоступности сервисов благодаря устойчивости брокера сообщений, и эффективную буферизацию пиковых нагрузок за счет сглаживания через очереди Kafka.
+Асинхронный подход обеспечивает значительное снижение задержек за счет немедленного ответа клиенту без ожидания полной обработки операций и  буферизацию пиковых нагрузок за счет очереди Kafka.
 
 
 
@@ -919,61 +937,74 @@ graph TB
 
 Система реализует механизм Graceful Shutdown, обеспечивающий плавное перераспределение трафика по схеме 10% → 50% → 100% при выключении или обновлении сервисов, что позволяет минимизировать влияние на пользователей и гарантировать завершение текущих операций. В условиях экстремальных нагрузок активируется стратегия Load Shedding, которая автоматически идентифицирует и отбрасывает некритичные запросы, сохраняя работоспособность ключевых функций системы и предотвращая каскадные сбои при перегрузках. Оба механизма работают согласованно, обеспечивая стабильность сервиса как в штатных, так и в аварийных scenarios.
 
+## Стратегия Graceful Degradation
+
+### Search Service недоступен
+**Бэкенд-действия:**
+- Перевести Search API в read-only mode (отключить новые обновления индекса)
+- Включить fallback: быстрый поиск поверх локального кэша сообщений 
+- Продолжить принимать events в Kafka, но задать lower priority для потребителя
+- Кэшировать популярные поисковые запросы 
+
+**Клиент (UX):**
+- Показывать локальную историю сообщений при поиске
+- Не блокировать интерфейс - сохранять возможность навигации по каналам
 
 
-**Стратегия Graceful Degradation**
+### Media Service недоступен (загрузки файлов, аватары)
+**Бэкенд-действия:**
+- Блокировка загрузки новых файлов и аватаров через presigned URL
+- Автоматическое переключение на статические placeholder-изображения
+- Буферизация метаданных медиа в outbox для последующей обработки
+- Временное отключение обработки изображения(CDC)
 
-Уровень 1: Search Service недоступен
-- Отключение полнотекстового поиска  
-- Отображение локальной истории сообщений  
-- Уведомление: "Поиск временно недоступен"
-
----
-
-Уровень 2: Media Service недоступен
-- Блокировка загрузки файлов и аватаров  
-- Отображение placeholder вместо аватаров  
-- Сохранение работоспособности текстового чата
-
----
-
-Уровень 3: Friend Service недоступен
-- Скрытие рекомендаций друзей  
-- Отображение кэшированного списка друзей  
-- Сохранение основных функций работы с друзьями
-
----
-
-Уровень 4: Cassandra недоступна
-- Переход в read-only режим  
-- Использование Tarantool-кэша для операций чтения  
-- Блокировка создания новых сообщений
+**Клиент (UX):**
+- Отображение градиентных placeholder вместо аватаров пользователей
+- Сохранение черновиков медиа-сообщений локально
+- Возможность отправки текстовых сообщений без медиавложений
 
 
-### Система кэширования
+### Friend Service (friendship / invites / recommendations)
 
-**Message Service**
-- **Хранилище:** Tarantool  
-- **Данные:** последние 100 сообщений канала  
-- **TTL:** 5 минут  
-- **Инвалидация:** при появлении новых сообщений  
-- **Fallback:** Cassandra (при недоступности кэша)  
+**Бэкенд-действия:**
+- **Invites/Friends:** обработка read/write в Postgres остаётся активной; write-события ставятся в outbox для обновления graph/analytics
+- **Recommendations:** перевод в fallback mode - отдавать кэшированные рекомендации, отключить heavy collaborative filtering
+- **Neo4j:** не пытаться синхронизировать, пока Postgres не в порядке - сохранять события в очереди
 
----
 
-**Notification Service**
-- **Данные:** последние 10 уведомлений пользователя  
-- **Хранилище:** Tarantool  
-- **TTL:** 5 минут  
-- **Инвалидация:** при получении новых уведомлений  
+**Клиент (UX):**
+- Скрыть "умные рекомендации" и показывать рекомендации на основе последних друзей/серверов
+- При отправке запроса в друзья - мгновенный отклик "Запрос отправлен" без ожидания обработки графа
+- Отображать кэшированные списки друзей и статусы
 
----
 
-**Profile Service**
-- **Данные:** недавно добавленные профили  
-- **Хранилище:** Tarantool  
-- **TTL:** 15 минут  
-- **Инвалидация:** при обновлении профилей  
+### Voice Service (SFU / signaling)
+**Бэкенд-действия:**
+- **Circuit Breaker:** ограничить новые звонки, но поддержать уже установленные соединения
+- **Load Shedding:** снизить качество аудио-кодеков для существующих звонков (Opus 64k → 32k)
+- **Fallback Routing:** маршрутизировать трафик через альтернатные SFU-узлы
+- **Health Monitoring:** health-check с быстрым исключением неисправных нод
+
+**Клиент (UX):**
+- Индикатор пониженного качества звука в активных звонках
+- Автоматические попытки переподключения с экспоненциальной backoff-задержкой
+
+
+### Cassandra недоступна
+**Бэкенд-действия:**
+- **Read-only mode:** для user-visible flows разрешить только чтение (quorum reads если возможно)
+- **Tarantool кэш:** интенсивное использование кэша для операций чтения сообщений и профилей
+- **Write Buffering:** буферизация новых сообщений в Redis/Tarantool с последующей синхронизацией
+- **Priority Queues:** приоритет критичных операций (голосовые состояния, сессии)
+- **Circuit Breaker:** быстрый отказ от недоступных нод Cassandra
+
+**Клиент (UX):**
+- Отображение сообщений из локального кэша и недавней истории
+- Сохранение черновиков на клиенте для автоматической отправки при восстановлении
+
+## Список серверов
+
+
 
 
 ## Список источников 
